@@ -1,0 +1,42 @@
+# Ensure you have the AzureAD and ExchangeOnlineManagement modules installed
+# Install-Module -Name AzureAD
+# Install-Module -Name ExchangeOnlineManagement
+
+# Connect to Azure AD and Exchange Online interactively
+Connect-AzureAD
+Connect-ExchangeOnline -ShowProgress $true
+
+# Prompt for the user's UPN or ObjectID to get template groups
+$userUPN = Read-Host "Enter the user's UPN or ObjectID for template groups"
+$groups = Get-AzureADUserMembership -ObjectId $userUPN | Where-Object { $_.ObjectType -eq "Group" }
+
+# Prompt for the CSV file path
+$csvFilePath = Read-Host "Enter the full path of the CSV file"
+$users = Import-Csv -Path $csvFilePath
+
+# Loop through each user in the CSV
+foreach ($user in $users) {
+    # Add user to Azure AD groups
+    $aadUser = Get-AzureADUser -Filter "UserPrincipalName eq '$($user.UserPrincipalName)'"
+    if ($aadUser) {
+        foreach ($groupId in $groups.ObjectId) {
+            try {
+                Add-AzureADGroupMember -ObjectId $groupId -RefObjectId $aadUser.ObjectId
+                Write-Host "Successfully added $($aadUser.DisplayName) to group $groupId."
+            } catch {
+                Write-Error "Error adding $($aadUser.DisplayName) to group $groupId. Error: $_"
+            }
+        }
+    } else {
+        Write-Warning "User $($user.UserPrincipalName) not found in Azure AD."
+    }
+
+    # Add user to Distribution and Mail-Enabled Security Groups
+    foreach ($group in $groups) {
+        Add-DistributionGroupMember -Identity $group.ObjectId -Member $user.UserPrincipalName
+    }
+}
+
+# Disconnect the Exchange Online session
+Disconnect-ExchangeOnline -Confirm:$false
+Disconnect-AzureAD -Confirm:$false
